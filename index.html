@@ -4,10 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>全国31省分时电价查询</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -15,8 +12,9 @@
       background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
       min-height: 100vh;
       color: #fff;
+      padding: 20px;
     }
-    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    .container { max-width: 1400px; margin: 0 auto; }
     header { text-align: center; margin-bottom: 40px; }
     h1 {
       font-size: 2.5rem;
@@ -53,7 +51,7 @@
       color: #fff;
       font-size: 14px;
     }
-    .chart-container { height: 400px; margin: 20px 0; }
+    .chart-container { height: 400px; margin: 20px 0; position: relative; }
     .time-slots {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -66,11 +64,6 @@
       padding: 16px;
       border-left: 4px solid;
     }
-    .time-slot.peak { border-color: #ef4444; }
-    .time-slot.high { border-color: #f97316; }
-    .time-slot.normal { border-color: #22c55e; }
-    .time-slot.low { border-color: #3b82f6; }
-    .time-slot.deep { border-color: #6366f1; }
     .slot-type { font-weight: bold; margin-bottom: 4px; }
     .slot-time { color: #64748b; font-size: 13px; }
     .slot-desc { color: #94a3b8; font-size: 12px; margin-top: 4px; }
@@ -90,43 +83,101 @@
       font-size: 13px;
       color: #eab308;
     }
+    .loading { text-align: center; padding: 40px; color: #94a3b8; }
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  
-  <script type="text/babel">
-    const { useState, useMemo } = React;
-    const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } = Recharts;
+  <div class="container">
+    <header>
+      <h1>⚡ 全国31省分时电价查询</h1>
+      <p class="subtitle">电网代理购电工商业用户分时电价</p>
+    </header>
     
-    // 简化版数据 - 只显示几个省份作为示例
+    <div class="main-layout">
+      <div class="panel">
+        <div class="form-group">
+          <label>搜索省份</label>
+          <input type="text" id="searchInput" placeholder="输入省份名称...">
+        </div>
+        
+        <div class="form-group">
+          <label>选择省份</label>
+          <select id="provinceSelect"></select>
+        </div>
+        
+        <div class="form-group">
+          <label>选择月份</label>
+          <select id="monthSelect">
+            <option value="1">1月</option>
+            <option value="2">2月</option>
+            <option value="3">3月</option>
+            <option value="4">4月</option>
+            <option value="5">5月</option>
+            <option value="6">6月</option>
+            <option value="7">7月</option>
+            <option value="8">8月</option>
+            <option value="9">9月</option>
+            <option value="10">10月</option>
+            <option value="11">11月</option>
+            <option value="12">12月</option>
+          </select>
+        </div>
+        
+        <div id="noteBox"></div>
+      </div>
+      
+      <div id="contentArea">
+        <div class="panel">
+          <h2 id="chartTitle">请选择省份和月份</h2>
+          <div class="chart-container">
+            <canvas id="priceChart"></canvas>
+          </div>
+        </div>
+        <div class="time-slots" id="timeSlots"></div>
+      </div>
+    </div>
+    
+    <footer>
+      <p>数据时间：2026年2月 | 执行范围：电网代理购电工商业用户</p>
+      <p style="margin-top: 10px; font-size: 12px;">
+        电价类型（从高到低）：尖峰 > 高峰 > 平段 > 低谷 > 深谷
+      </p>
+    </footer>
+  </div>
+
+  <script>
+    // 电价数据
+    const PRICE_RATIOS = { '尖峰': 1.8, '高峰': 1.5, '平段': 1.0, '低谷': 0.5, '深谷': 0.3 };
+    const PRICE_COLORS = { '尖峰': '#ef4444', '高峰': '#f97316', '平段': '#22c55e', '低谷': '#3b82f6', '深谷': '#6366f1' };
+    
+    // 简化版省份数据
     const provinceData = [
       {
         name: '河南省',
         hasTimeOfUsePricing: true,
         note: '尖峰：1月、12月17:00-19:00；7-8月20:00-23:00',
-        months: [
-          { month: 1, monthName: '1月', timeSlots: [
+        months: {
+          1: { monthName: '1月', timeSlots: [
             { type: '尖峰', startTime: '17:00', endTime: '19:00', description: '尖峰时段' },
             { type: '高峰', startTime: '16:00', endTime: '17:00', description: '高峰时段1' },
             { type: '高峰', startTime: '19:00', endTime: '24:00', description: '高峰时段2' },
             { type: '平段', startTime: '07:00', endTime: '16:00', description: '平段' },
             { type: '低谷', startTime: '00:00', endTime: '07:00', description: '低谷时段' },
           ]},
-          { month: 7, monthName: '7月', timeSlots: [
+          7: { monthName: '7月', timeSlots: [
             { type: '尖峰', startTime: '20:00', endTime: '23:00', description: '尖峰时段' },
             { type: '高峰', startTime: '16:00', endTime: '20:00', description: '高峰时段1' },
             { type: '高峰', startTime: '23:00', endTime: '24:00', description: '高峰时段2' },
             { type: '平段', startTime: '07:00', endTime: '16:00', description: '平段' },
             { type: '低谷', startTime: '00:00', endTime: '07:00', description: '低谷时段' },
           ]},
-        ]
+        }
       },
       {
         name: '北京市',
         hasTimeOfUsePricing: true,
-        months: [
-          { month: 7, monthName: '7月', timeSlots: [
+        months: {
+          7: { monthName: '7月', timeSlots: [
             { type: '尖峰', startTime: '11:00', endTime: '13:00', description: '尖峰时段1' },
             { type: '尖峰', startTime: '16:00', endTime: '17:00', description: '尖峰时段2' },
             { type: '高峰', startTime: '10:00', endTime: '11:00', description: '高峰上午1' },
@@ -136,13 +187,13 @@
             { type: '平段', startTime: '22:00', endTime: '23:00', description: '平段晚间' },
             { type: '低谷', startTime: '23:00', endTime: '07:00', description: '低谷时段' },
           ]},
-        ]
+        }
       },
       {
         name: '广东省（珠三角五市）',
         hasTimeOfUsePricing: true,
-        months: [
-          { month: 7, monthName: '7月', timeSlots: [
+        months: {
+          7: { monthName: '7月', timeSlots: [
             { type: '尖峰', startTime: '11:00', endTime: '12:00', description: '尖峰时段1' },
             { type: '尖峰', startTime: '15:00', endTime: '17:00', description: '尖峰时段2' },
             { type: '高峰', startTime: '10:00', endTime: '12:00', description: '高峰上午' },
@@ -152,177 +203,160 @@
             { type: '平段', startTime: '19:00', endTime: '24:00', description: '平段晚间' },
             { type: '低谷', startTime: '00:00', endTime: '08:00', description: '低谷时段' },
           ]},
-        ]
+        }
+      },
+      {
+        name: '上海市',
+        hasTimeOfUsePricing: true,
+        months: {
+          7: { monthName: '7月', timeSlots: [
+            { type: '尖峰', startTime: '12:00', endTime: '14:00', description: '尖峰时段' },
+            { type: '高峰', startTime: '08:00', endTime: '12:00', description: '高峰上午' },
+            { type: '高峰', startTime: '14:00', endTime: '15:00', description: '高峰下午1' },
+            { type: '高峰', startTime: '18:00', endTime: '21:00', description: '高峰晚间' },
+            { type: '平段', startTime: '06:00', endTime: '08:00', description: '平段早晨' },
+            { type: '平段', startTime: '15:00', endTime: '18:00', description: '平段下午' },
+            { type: '平段', startTime: '21:00', endTime: '22:00', description: '平段晚间' },
+            { type: '低谷', startTime: '22:00', endTime: '06:00', description: '低谷时段' },
+          ]},
+        }
       },
     ];
     
-    const PRICE_RATIOS = { '尖峰': 1.8, '高峰': 1.5, '平段': 1.0, '低谷': 0.5, '深谷': 0.3 };
-    const PRICE_COLORS = { '尖峰': '#ef4444', '高峰': '#f97316', '平段': '#22c55e', '低谷': '#3b82f6', '深谷': '#6366f1' };
+    let chart = null;
     
-    function App() {
-      const [selectedProvince, setSelectedProvince] = useState(provinceData[0]);
-      const [selectedMonth, setSelectedMonth] = useState(1);
-      const [searchTerm, setSearchTerm] = useState('');
+    function init() {
+      const provinceSelect = document.getElementById('provinceSelect');
+      const searchInput = document.getElementById('searchInput');
+      const monthSelect = document.getElementById('monthSelect');
       
-      const filteredProvinces = useMemo(() => {
-        return provinceData.filter(p => p.name.includes(searchTerm));
-      }, [searchTerm]);
+      // 填充省份选择
+      provinceSelect.innerHTML = provinceData.map(p => 
+        `<option value="${p.name}">${p.name}</option>`
+      ).join('');
       
-      const monthData = useMemo(() => {
-        return selectedProvince.months.find(m => m.month === selectedMonth);
-      }, [selectedProvince, selectedMonth]);
+      // 搜索功能
+      searchInput.addEventListener('input', (e) => {
+        const term = e.target.value.toLowerCase();
+        const filtered = provinceData.filter(p => p.name.toLowerCase().includes(term));
+        provinceSelect.innerHTML = filtered.map(p => 
+          `<option value="${p.name}">${p.name}</option>`
+        ).join('');
+      });
       
-      const chartData = useMemo(() => {
-        if (!monthData) return [];
-        return monthData.timeSlots.map(slot => ({
-          name: slot.description || slot.type,
-          type: slot.type,
-          value: PRICE_RATIOS[slot.type],
-          startTime: slot.startTime,
-          endTime: slot.endTime,
-        }));
-      }, [monthData]);
+      // 省份选择变化
+      provinceSelect.addEventListener('change', updateDisplay);
+      monthSelect.addEventListener('change', updateDisplay);
       
-      const getSlotClass = (type) => {
-        if (type === '尖峰') return 'peak';
-        if (type === '高峰') return 'high';
-        if (type === '平段') return 'normal';
-        if (type === '低谷') return 'low';
-        return 'deep';
-      };
-      
-      return (
-        <div className="container">
-          <header>
-            <h1>⚡ 全国31省分时电价查询</h1>
-            <p className="subtitle">电网代理购电工商业用户分时电价</p>
-          </header>
-          
-          <div className="main-layout">
-            <div className="panel">
-              <div className="form-group">
-                <label>搜索省份</label>
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="输入省份名称..."
-                />
-              </div>
-              
-              <div className="form-group">
-                <label>选择省份</label>
-                <select
-                  value={selectedProvince.name}
-                  onChange={(e) => {
-                    const p = provinceData.find(p => p.name === e.target.value);
-                    if (p) setSelectedProvince(p);
-                  }}
-                >
-                  {filteredProvinces.map(p => (
-                    <option key={p.name} value={p.name}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-              
-              <div className="form-group">
-                <label>选择月份</label>
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                >
-                  {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => (
-                    <option key={m} value={m}>{m}月</option>
-                  ))}
-                </select>
-              </div>
-              
-              {selectedProvince.note && (
-                <div className="note">📌 {selectedProvince.note}</div>
-              )}
-            </div>
-            
-            <div>
-              {!selectedProvince.hasTimeOfUsePricing ? (
-                <div className="panel" style={{textAlign: 'center', padding: '60px'}}>
-                  <div style={{fontSize: '4rem', marginBottom: '20px'}}>🏠</div>
-                  <h2>{selectedProvince.name}</h2>
-                  <p style={{color: '#94a3b8', marginTop: '10px'}}>该省份不实行分时电价政策</p>
-                </div>
-              ) : monthData ? (
-                <div>
-                  <div className="panel">
-                    <h2 style={{marginBottom: '20px'}}>
-                      {selectedProvince.name} - {selectedMonth}月分时电价
-                    </h2>
-                    
-                    <div className="chart-container">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData}>
-                          <XAxis 
-                            dataKey="name" 
-                            tick={{ fill: '#94a3b8', fontSize: 12 }}
-                            angle={-45}
-                            textAnchor="end"
-                            height={80}
-                          />
-                          <YAxis tick={{ fill: '#94a3b8' }} />
-                          <Tooltip 
-                            contentStyle={{ 
-                              background: 'rgba(15, 23, 42, 0.95)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              borderRadius: '8px',
-                              color: '#fff'
-                            }}
-                            formatter={(value, name, props) => [
-                              `电价比例: ${value}`,
-                              `${props.payload.type}`,
-                              `时间: ${props.payload.startTime} - ${props.payload.endTime}`
-                            ]}
-                          />
-                          <Bar dataKey="value" radius={[8, 8, 0, 0]}>
-                            {chartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={PRICE_COLORS[entry.type]} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                  
-                  <div className="time-slots">
-                    {monthData.timeSlots.map((slot, idx) => (
-                      <div key={idx} className={`time-slot ${getSlotClass(slot.type)}`}>
-                        <div className="slot-type" style={{color: PRICE_COLORS[slot.type]}}>
-                          {slot.type}
-                        </div>
-                        <div className="slot-time">
-                          {slot.startTime} - {slot.endTime}
-                        </div>
-                        <div className="slot-desc">{slot.description}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="panel" style={{textAlign: 'center', padding: '40px', color: '#64748b'}}>
-                  该月份暂无数据
-                </div>
-              )}
-            </div>
-          </div>
-          
-          <footer>
-            <p>数据时间：2026年2月 | 执行范围：电网代理购电工商业用户</p>
-            <p style={{marginTop: '10px', fontSize: '12px'}}>
-              电价类型（从高到低）：尖峰 > 高峰 > 平段 > 低谷 > 深谷
-            </p>
-          </footer>
-        </div>
-      );
+      // 初始显示
+      updateDisplay();
     }
     
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    function updateDisplay() {
+      const provinceName = document.getElementById('provinceSelect').value;
+      const month = parseInt(document.getElementById('monthSelect').value);
+      const province = provinceData.find(p => p.name === provinceName);
+      
+      if (!province) return;
+      
+      // 显示备注
+      const noteBox = document.getElementById('noteBox');
+      if (province.note) {
+        noteBox.innerHTML = `<div class="note">📌 ${province.note}</div>`;
+      } else {
+        noteBox.innerHTML = '';
+      }
+      
+      // 更新标题
+      document.getElementById('chartTitle').textContent = 
+        `${province.name} - ${month}月分时电价`;
+      
+      const monthData = province.months[month];
+      
+      if (!monthData) {
+        document.getElementById('timeSlots').innerHTML = 
+          '<div class="panel" style="text-align:center;padding:40px;color:#64748b">该月份暂无数据</div>';
+        if (chart) chart.destroy();
+        return;
+      }
+      
+      // 更新图表
+      updateChart(monthData.timeSlots);
+      
+      // 更新时段卡片
+      const slotsHtml = monthData.timeSlots.map(slot => {
+        const color = PRICE_COLORS[slot.type];
+        return `
+          <div class="time-slot" style="border-left-color: ${color}">
+            <div class="slot-type" style="color: ${color}">${slot.type}</div>
+            <div class="slot-time">${slot.startTime} - ${slot.endTime}</div>
+            <div class="slot-desc">${slot.description}</div>
+          </div>
+        `;
+      }).join('');
+      
+      document.getElementById('timeSlots').innerHTML = slotsHtml;
+    }
+    
+    function updateChart(timeSlots) {
+      const ctx = document.getElementById('priceChart').getContext('2d');
+      
+      if (chart) chart.destroy();
+      
+      const labels = timeSlots.map(s => s.description || s.type);
+      const data = timeSlots.map(s => PRICE_RATIOS[s.type]);
+      const colors = timeSlots.map(s => PRICE_COLORS[s.type]);
+      
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '电价相对比例',
+            data: data,
+            backgroundColor: colors,
+            borderRadius: 8,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: (items) => {
+                  const idx = items[0].dataIndex;
+                  return timeSlots[idx].type;
+                },
+                label: (item) => {
+                  const idx = item.dataIndex;
+                  const slot = timeSlots[idx];
+                  return [
+                    `电价比例: ${item.raw}`,
+                    `时间: ${slot.startTime} - ${slot.endTime}`
+                  ];
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#94a3b8' },
+              grid: { color: 'rgba(255,255,255,0.1)' }
+            },
+            x: {
+              ticks: { color: '#94a3b8' },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+    }
+    
+    // 初始化
+    document.addEventListener('DOMContentLoaded', init);
   </script>
 </body>
 </html>
